@@ -17,7 +17,7 @@
 //	{  0,  1,  1 }, {  0, -1,  1 }, {  0,  1, -1 }, {  0, -1, -1 }
 //};
 
-inline __device__ float d_dot_with_vec(float i, float j, float k, float x, float y, float z, uint32_t seed)
+inline __device__ float d_dot_with_hashed_vec(float i, float j, float k, float x, float y, float z, uint32_t seed)
 {
 	const uint32_t h = (__float_as_int(i) * 73856093) ^ (__float_as_int(j) * 19349663) ^ (__float_as_int(k) * 83492791) ^ seed;
 
@@ -31,9 +31,9 @@ inline __device__ float d_dot_with_vec(float i, float j, float k, float x, float
 	//Get hash in [0, 2]
 	const uint32_t h_3 = ((h >> 4) * 3) >> 28;
 
-	uint32_t a, b;
-
 	//Decide which inputs to pick depending on h_3
+	uint32_t a, b;
+	
 	if (h_3 == 0)
 	{
 		a = __float_as_int(y);
@@ -49,7 +49,7 @@ inline __device__ float d_dot_with_vec(float i, float j, float k, float x, float
 		a = __float_as_int(x);
 		b = __float_as_int(y);
 	}
-
+	
 	//Return picked inputs, either negated or not, depending on masks
 	return __int_as_float(a ^ neg1) + __int_as_float(b ^ neg2);
 }
@@ -84,19 +84,13 @@ __global__ void d_simplex_3d_float(cudaPitchedPtr out, uint3 dim, float3 begin, 
 	const float y0 = y_in - j0 + unskew;
 	const float z0 = z_in - k0 + unskew;
 
-	const bool x_ge_y = x0 >= y0;
-	const bool x_ge_z = x0 >= z0;
-	const bool y_ge_z = y0 >= z0;
-
-	const float i1 = static_cast<float>(  x_ge_y  &   x_ge_z );		//max == x
-	const float i2 = static_cast<float>(  x_ge_y  |   x_ge_z );		//min != x
-
-	const float j1 = static_cast<float>((!x_ge_y) &   y_ge_z );		//max == y
-	const float j2 = static_cast<float>((!x_ge_y) |   y_ge_z );		//min != y
-
-	const float k1 = static_cast<float>((!x_ge_z) & (!y_ge_z));		//max == z
-	const float k2 = static_cast<float>((!x_ge_z) | (!y_ge_z));		//min != z
-
+	const float i1 = ((x0 >= y0) & (x0 >= z0)) ? 1.0F : 0.0F;    //max == x
+	const float j1 = ((y0 >  x0) & (y0 >= z0)) ? 1.0F : 0.0F;    //max == y
+	const float k1 = ((z0 >  x0) & (z0 >  y0)) ? 1.0F : 0.0F;    //max == z
+	const float i2 = ((x0 >= y0) | (x0 >= z0)) ? 1.0F : 0.0F;    //min != x
+	const float j2 = ((y0 >  x0) | (y0 >= z0)) ? 1.0F : 0.0F;    //min != y
+	const float k2 = ((z0 >  x0) | (z0 >  y0)) ? 1.0F : 0.0F;    //min != z
+	
 	const float x1 = x0 - i1 + unskew_factor;
 	const float y1 = y0 - j1 + unskew_factor;
 	const float z1 = z0 - k1 + unskew_factor;
@@ -108,22 +102,22 @@ __global__ void d_simplex_3d_float(cudaPitchedPtr out, uint3 dim, float3 begin, 
 	const float x3 = x0 - 1.0F + unskew_factor * 3.0F;
 	const float y3 = y0 - 1.0F + unskew_factor * 3.0F;
 	const float z3 = z0 - 1.0F + unskew_factor * 3.0F;
-
+	
 	float t0 = 0.5F - x0 * x0 - y0 * y0 - z0 * z0;
-	if (t0 < 0) t0 = 0;
-	t0 = t0 * t0 * t0 * t0 * d_dot_with_vec(i0, j0, k0, x0, y0, z0, seed);
+	if (t0 < 0.0F) t0 = 0.0F;
+	t0 = t0 * t0 * t0 * t0 * d_dot_with_hashed_vec(       i0,        j0,        k0, x0, y0, z0, seed);
 
 	float t1 = 0.5F - x1 * x1 - y1 * y1 - z1 * z1;
-	if (t1 < 0) t1 = 0;
-	t1 = t1 * t1 * t1 * t1 * d_dot_with_vec(i0 + i1, j0 + j1, k0 + k1, x1, y1, z1, seed);
+	if (t1 < 0.0F) t1 = 0.0F;
+	t1 = t1 * t1 * t1 * t1 * d_dot_with_hashed_vec(  i1 + i0,   j1 + j0,   k1 + k0, x1, y1, z1, seed);
 
 	float t2 = 0.5F - x2 * x2 - y2 * y2 - z2 * z2;
-	if (t2 < 0) t2 = 0;
-	t2 = t2 * t2 * t2 * t2 * d_dot_with_vec(i0 + i2, j0 + j2, k0 + k2, x2, y2, z2, seed);
+	if (t2 < 0.0F) t2 = 0.0F;
+	t2 = t2 * t2 * t2 * t2 * d_dot_with_hashed_vec(  i2 + i0,   j2 + j0,   k2 + k0, x2, y2, z2, seed);
 
 	float t3 = 0.5F - x3 * x3 - y3 * y3 - z3 * z3;
-	if (t3 < 0) t3 = 0;
-	t3 = t3 * t3 * t3 * t3 * d_dot_with_vec(i0 + 1.0F, j0 + 1.0F, k0 + 1.0F, x3, y3, z3, seed);
+	if (t3 < 0.0F) t3 = 0.0F;
+	t3 = t3 * t3 * t3 * t3 * d_dot_with_hashed_vec(1.0F + i0, 1.0F + j0, 1.0F + k0, x3, y3, z3, seed);
 
 	//76.0F maps to just within [-1.0F, 1.0F]
 	reinterpret_cast<float*>(out.ptr)[idx_x + idx_y * out.pitch + idx_z * out.pitch * out.ysize] = 76.0F * (t0 + t1 + t2 + t3);
@@ -166,14 +160,13 @@ __global__ void d_simplex_3d_uint8_t(cudaPitchedPtr out, uint3 dim, float3 begin
 	const float y0 = y_in - y_orig;
 	const float z0 = z_in - z_orig;
 
-	const float i1 = (float)((x0 >= y0) & (x0 >= z0));		//max == x
-	const float j1 = (float)((y0 > x0) & (y0 >= z0));		//max == y
-	const float k1 = (float)((z0 > x0) & (z0 > y0));		//max == z
-
-	const float i2 = (float)((x0 >= y0) | (x0 >= z0));		//min != x
-	const float j2 = (float)((y0 > x0) | (y0 >= z0));		//min != y
-	const float k2 = (float)((z0 > x0) | (z0 > y0));		//min != z
-
+	const float i1 = ((x0 >= y0) & (x0 >= z0)) ? 1.0F : 0.0F;    //max == x
+	const float j1 = ((y0 >  x0) & (y0 >= z0)) ? 1.0F : 0.0F;    //max == y
+	const float k1 = ((z0 >  x0) & (z0 >  y0)) ? 1.0F : 0.0F;    //max == z
+	const float i2 = ((x0 >= y0) | (x0 >= z0)) ? 1.0F : 0.0F;    //min != x
+	const float j2 = ((y0 >  x0) | (y0 >= z0)) ? 1.0F : 0.0F;    //min != y
+	const float k2 = ((z0 >  x0) | (z0 >  y0)) ? 1.0F : 0.0F;    //min != z
+	
 	const float x1 = x0 - i1 + unskew_factor;
 	const float y1 = y0 - j1 + unskew_factor;
 	const float z1 = z0 - k1 + unskew_factor;
@@ -187,20 +180,20 @@ __global__ void d_simplex_3d_uint8_t(cudaPitchedPtr out, uint3 dim, float3 begin
 	const float z3 = z0 - 1.0F + unskew_factor * 3.0F;
 
 	float t0 = 0.5F - x0 * x0 - y0 * y0 - z0 * z0;
-	if (t0 < 0) t0 = 0;
-	t0 = t0 * t0 * t0 * t0 * d_dot_with_vec(i0, j0, k0, x0, y0, z0, seed);
+	if (t0 < 0.0F) t0 = 0.0F;
+	t0 = t0 * t0 * t0 * t0 * d_dot_with_hashed_vec(       i0,        j0,        k0, x0, y0, z0, seed);
 
 	float t1 = 0.5F - x1 * x1 - y1 * y1 - z1 * z1;
-	if (t1 < 0) t1 = 0;
-	t1 = t1 * t1 * t1 * t1 * d_dot_with_vec(i0 + i1, j0 + j1, k0 + k1, x1, y1, z1, seed);
+	if (t1 < 0.0F) t1 = 0.0F;
+	t1 = t1 * t1 * t1 * t1 * d_dot_with_hashed_vec(  i1 + i0,   j1 + j0,   k1 + k0, x1, y1, z1, seed);
 
 	float t2 = 0.5F - x2 * x2 - y2 * y2 - z2 * z2;
-	if (t2 < 0) t2 = 0;
-	t2 = t2 * t2 * t2 * t2 * d_dot_with_vec(i0 + i2, j0 + j2, k0 + k2, x2, y2, z2, seed);
+	if (t2 < 0.0F) t2 = 0.0F;
+	t2 = t2 * t2 * t2 * t2 * d_dot_with_hashed_vec(  i2 + i0,   j2 + j0,   k2 + k0, x2, y2, z2, seed);
 
 	float t3 = 0.5F - x3 * x3 - y3 * y3 - z3 * z3;
-	if (t3 < 0) t3 = 0;
-	t3 = t3 * t3 * t3 * t3 * d_dot_with_vec(i0 + 1.0F, j0 + 1.0F, k0 + 1.0F, x3, y3, z3, seed);
+	if (t3 < 0.0F) t3 = 0.0F;
+	t3 = t3 * t3 * t3 * t3 * d_dot_with_hashed_vec(1.0F + i0, 1.0F + j0, 1.0F + k0, x3, y3, z3, seed);
 
 	reinterpret_cast<uint8_t*>(out.ptr)[idx_x + idx_y * out.pitch + idx_z * out.pitch * out.ysize] = (76.0F * (t0 + t1 + t2 + t3)) * 128 + 128;
 

@@ -64,8 +64,6 @@ const och::stringview screen_id("screen");
 
 int main(int argc, const char** argv)
 {
-
-
 	launch_voxels(log2_sz, 0, 0);
 	
 	window w;
