@@ -2,7 +2,6 @@
 #include <cstdio>
 
 #include "voxels.h"
-#include "screen.h"
 
 #include "och_simplex_noise.h"
 #include "och_fmt.h"

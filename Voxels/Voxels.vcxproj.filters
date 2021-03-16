@@ -3,7 +3,6 @@
   <ItemGroup>
     <ClCompile Include="main.cpp" />
     <ClCompile Include="och_simplex_noise.cpp" />
-    <ClCompile Include="screen.cpp" />
     <ClCompile Include="..\..\och_lib\och_lib\och_tok.cpp">
       <Filter>och_lib</Filter>
     </ClCompile>
@@ -40,8 +39,6 @@
     <ClInclude Include="och_simplex_noise.h" />
     <ClInclude Include="olcPixelGameEngine.h" />
     <ClInclude Include="och_simplex_noise_gpu.cuh" />
-    <ClInclude Include="screen.h" />
-    <ClInclude Include="virtual_keys.h" />
     <ClInclude Include="..\..\och_lib\och_lib\och_basic_types.h">
       <Filter>och_lib</Filter>
     </ClInclude>
@@ -105,8 +102,5 @@
     <Filter Include="och_lib">
       <UniqueIdentifier>{344d8f40-422f-49e5-b70e-8d088f634acd}</UniqueIdentifier>
     </Filter>
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="Text.txt" />
   </ItemGroup>
 </Project>

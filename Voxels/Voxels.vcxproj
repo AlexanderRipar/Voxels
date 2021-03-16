@@ -22,7 +22,6 @@
     <ClCompile Include="..\..\och_lib\och_lib\och_wnd.cpp" />
     <ClCompile Include="main.cpp" />
     <ClCompile Include="och_simplex_noise.cpp" />
-    <ClCompile Include="screen.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="..\..\och_lib\och_lib\och_basic_types.h" />
@@ -46,16 +45,11 @@
     <ClInclude Include="och_simplex_noise.h" />
     <ClInclude Include="och_simplex_noise_gpu.cuh" />
     <ClInclude Include="olcPixelGameEngine.h" />
-    <ClInclude Include="screen.h" />
-    <ClInclude Include="virtual_keys.h" />
     <ClInclude Include="voxels.h" />
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="och_simplex_noise_gpu.cu" />
     <CudaCompile Include="voxels.cu" />
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="Text.txt" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <ProjectGuid>{CB22157C-FB08-40A0-926D-E137C4917074}</ProjectGuid>
