@@ -40,14 +40,21 @@
     <ClInclude Include="..\..\och_lib\och_lib\och_utf16.h" />
     <ClInclude Include="..\..\och_lib\och_lib\och_utf8.h" />
     <ClInclude Include="..\..\och_lib\och_lib\och_utf8buf.h" />
+    <ClInclude Include="..\..\och_lib\och_lib\och_virtual_keys.h" />
     <ClInclude Include="..\..\och_lib\och_lib\och_wnd.h" />
+    <ClInclude Include="d3dx12.h" />
+    <ClInclude Include="och_bytes_to_bits_gpu.cuh" />
     <ClInclude Include="och_cudahelpers.cuh" />
+    <ClInclude Include="curender.h" />
+    <ClInclude Include="och_setints_gpu.cuh" />
     <ClInclude Include="och_simplex_noise.h" />
     <ClInclude Include="och_simplex_noise_gpu.cuh" />
     <ClInclude Include="olcPixelGameEngine.h" />
     <ClInclude Include="voxels.h" />
   </ItemGroup>
   <ItemGroup>
+    <CudaCompile Include="och_bytes_to_bits_gpu.cu" />
+    <CudaCompile Include="och_setints_gpu.cu" />
     <CudaCompile Include="och_simplex_noise_gpu.cu" />
     <CudaCompile Include="voxels.cu" />
   </ItemGroup>
@@ -99,7 +106,7 @@
     <Link>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;d3d12.lib;d3dcompiler.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>
@@ -122,7 +129,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <SubSystem>Console</SubSystem>
-      <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>cudart_static.lib;kernel32.lib;user32.lib;gdi32.lib;winspool.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;oleaut32.lib;uuid.lib;odbc32.lib;odbccp32.lib;d3d12.lib;d3dcompiler.lib;dxgi.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <CudaCompile>
       <TargetMachinePlatform>64</TargetMachinePlatform>

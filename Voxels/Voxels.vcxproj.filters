@@ -12,9 +12,6 @@
     <ClCompile Include="..\..\och_lib\och_lib\och_utf16.cpp">
       <Filter>och_lib</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\och_lib\och_lib\och_wnd.cpp">
-      <Filter>och_lib</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\och_lib\och_lib\och_fio.cpp">
       <Filter>och_lib</Filter>
     </ClCompile>
@@ -30,6 +27,9 @@
     <ClCompile Include="..\..\och_lib\och_lib\och_time.cpp">
       <Filter>och_lib</Filter>
     </ClCompile>
+    <ClCompile Include="..\..\och_lib\och_lib\och_wnd.cpp">
+      <Filter>och_lib</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="voxels.h" />
@@ -38,7 +38,6 @@
     </ClInclude>
     <ClInclude Include="och_simplex_noise.h" />
     <ClInclude Include="olcPixelGameEngine.h" />
-    <ClInclude Include="och_simplex_noise_gpu.cuh" />
     <ClInclude Include="..\..\och_lib\och_lib\och_basic_types.h">
       <Filter>och_lib</Filter>
     </ClInclude>
@@ -87,13 +86,35 @@
     <ClInclude Include="..\..\och_lib\och_lib\och_utf16.h">
       <Filter>och_lib</Filter>
     </ClInclude>
+    <ClInclude Include="och_simplex_noise_gpu.cuh">
+      <Filter>cuda_base_functions</Filter>
+    </ClInclude>
+    <ClInclude Include="och_bytes_to_bits_gpu.cuh">
+      <Filter>cuda_base_functions</Filter>
+    </ClInclude>
+    <ClInclude Include="curender.h" />
+    <ClInclude Include="d3dx12.h" />
+    <ClInclude Include="..\..\och_lib\och_lib\och_virtual_keys.h">
+      <Filter>och_lib</Filter>
+    </ClInclude>
     <ClInclude Include="..\..\och_lib\och_lib\och_wnd.h">
       <Filter>och_lib</Filter>
+    </ClInclude>
+    <ClInclude Include="och_setints_gpu.cuh">
+      <Filter>cuda_base_functions</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <CudaCompile Include="voxels.cu" />
-    <CudaCompile Include="och_simplex_noise_gpu.cu" />
+    <CudaCompile Include="och_simplex_noise_gpu.cu">
+      <Filter>cuda_base_functions</Filter>
+    </CudaCompile>
+    <CudaCompile Include="och_bytes_to_bits_gpu.cu">
+      <Filter>cuda_base_functions</Filter>
+    </CudaCompile>
+    <CudaCompile Include="och_setints_gpu.cu">
+      <Filter>cuda_base_functions</Filter>
+    </CudaCompile>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="HELPERS">
@@ -101,6 +122,9 @@
     </Filter>
     <Filter Include="och_lib">
       <UniqueIdentifier>{344d8f40-422f-49e5-b70e-8d088f634acd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="cuda_base_functions">
+      <UniqueIdentifier>{d01601c6-1386-430d-8a61-3f44250f6073}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

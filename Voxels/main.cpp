@@ -9,6 +9,8 @@
 #define OLC_PGE_APPLICATION
 #include "olcPixelGameEngine.h"
 
+#include "curender.h"
+
 constexpr int log2_sz = 8;
 
 constexpr int sz = 1 << log2_sz;
@@ -64,10 +66,13 @@ const och::stringview screen_id("screen");
 
 int main(int argc, const char** argv)
 {
-	launch_voxels(log2_sz, 0, 0);
+	//launch_voxels(log2_sz, 0, 0);
 	
-	window w;
+	//window w;
+	//if (w.Construct(sz, sz, 1, 1))
+	//	w.Start();
+
+	render_data r(1280, 720, L"Hello there");
 	
-	if (w.Construct(sz, sz, 1, 1))
-		w.Start();
+	r.run();
 }
