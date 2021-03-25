@@ -148,8 +148,6 @@ struct render_data
 		//Set DPI to be separate for each screen, to allow for flexible tearing-behaviour
 		SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 
-		//init_debug();
-
 		//Initialize D3D12 Debugger
 		{
 #ifdef GRAPHICS_DEBUG
@@ -158,8 +156,6 @@ struct render_data
 			m_debug_interface->EnableDebugLayer();
 #endif // GRAPHICS_DEBUG
 		}
-
-		//LUID dev_luid = set_best_cuda_device_idx();
 
 		union
 		{
@@ -207,8 +203,6 @@ struct render_data
 			cudaSetDevice(best_idx);
 		}
 
-		//init_window(width, height, title);
-
 		//Initialize window
 		{
 			m_window_width = width;
@@ -250,8 +244,6 @@ struct render_data
 			GetWindowRect(m_window, &m_window_rect);
 		}
 
-		//comptr<IDXGIFactory4> dxgi_factory = create_dxgi_factory();
-
 		IDXGIFactory4* dxgi_factory;
 
 		//Create DXGI-factory COM-Interface, which is stored in the above pointer
@@ -264,8 +256,6 @@ struct render_data
 
 			check(CreateDXGIFactory2(factory_flags, IID_PPV_ARGS(&dxgi_factory)));
 		}
-
-		//m_supports_tearing = has_tearing_support(dxgi_factory);
 
 		//Query whether tearing is supported
 		{
@@ -283,8 +273,6 @@ struct render_data
 			dxgi_factory_5->Release();
 		}
 
-		//comptr<IDXGIAdapter4> dx12_adapter = get_adapter_by_luid(dev_luid, dxgi_factory);
-
 		IDXGIAdapter4* dxgi_adapter;
 
 		//Get the DXGI adapter corresponding to the luid of the previously selected cuda-device, and save it in the above pointer
@@ -300,8 +288,6 @@ struct render_data
 
 			adapter_1->Release();
 		}
-
-		//m_device = create_d3d12_device(dxgi_adapter);
 
 		//Create D3D12-Device from DXGI adapter
 		{
@@ -331,8 +317,6 @@ struct render_data
 #endif // GRAPHICS_DEBUG
 		}
 
-		//m_cmd_queue = create_d3d12_command_queue(m_device, D3D12_COMMAND_LIST_TYPE_DIRECT);
-
 		//Create D3D12 command-queue
 		{
 			D3D12_COMMAND_QUEUE_DESC queue_desc{};
@@ -344,8 +328,6 @@ struct render_data
 
 			check(m_device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&m_cmd_queue)));
 		}
-
-		//m_swapchain = create_swapchain(m_window, m_cmd_queue, m_window_width, m_window_height, m_frame_cnt, dxgi_factory);
 
 		//Create DXGI swapchain
 		{
@@ -378,8 +360,6 @@ struct render_data
 		//Get index of current backbuffer from swapchain
 		m_curr_frame = m_swapchain->GetCurrentBackBufferIndex();
 
-		//m_rtv_desc_heap = create_descriptor_heap(m_device, D3D12_DESCRIPTOR_HEAP_TYPE_RTV, m_frame_cnt);
-
 		//Create Render Target View descriptor heap for use by the swapchain
 		{
 			D3D12_DESCRIPTOR_HEAP_DESC heap_desc{};
@@ -395,8 +375,23 @@ struct render_data
 		//Query size of RTV descriptors created above
 		m_rtv_desc_size = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-		//Update the RTVs
-		update_rtvs(m_device, m_swapchain, m_rtv_desc_heap);
+		//Bind backbuffers to swapchain
+		{
+			CD3DX12_CPU_DESCRIPTOR_HANDLE rtv_handle(m_rtv_desc_heap->GetCPUDescriptorHandleForHeapStart());
+
+			for (int32_t i = 0; i != m_frame_cnt; ++i)
+			{
+				ID3D12Resource* backbuffer;
+
+				check(m_swapchain->GetBuffer(i, IID_PPV_ARGS(&backbuffer)));
+
+				m_device->CreateRenderTargetView(backbuffer, nullptr, rtv_handle);
+
+				m_backbuffers[i] = backbuffer;
+
+				rtv_handle.Offset(m_rtv_desc_size);
+			}
+		}
 
 		//for (int32_t i = 0; i != m_frame_cnt; ++i)
 		//	m_cmd_allocators[i] = create_command_allocator(m_device, D3D12_COMMAND_LIST_TYPE_DIRECT);
@@ -405,8 +400,6 @@ struct render_data
 			for (int32_t i = 0; i != m_frame_cnt; ++i)
 				check(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS((m_cmd_allocators + i))));
 
-		//m_cmd_list = create_command_list(m_device, m_cmd_allocators[m_curr_frame], D3D12_COMMAND_LIST_TYPE_DIRECT);
-
 		//Create command list, which initially uses the allocator corresponding to the swapchain's current backbuffer
 		{
 			check(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_cmd_allocators[m_curr_frame], nullptr, IID_PPV_ARGS(&m_cmd_list)));
@@ -414,12 +407,8 @@ struct render_data
 			check(m_cmd_list->Close());
 		}
 
-		//m_fence = create_fence(m_device, D3D12_FENCE_FLAG_SHARED);
-
 		//Create a shared D3D12 fence which can also be accessed by cuda
 		m_device->CreateFence(0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&m_fence));
-
-		//map_fence_to_cuda();
 
 		//Map the previously created fence for access by cuda
 		{
@@ -432,8 +421,6 @@ struct render_data
 
 			check(cudaImportExternalSemaphore(&m_cu_fence, &fence_desc));
 		}
-
-		m_fence_event = create_event_handle();
 
 		//Create an awaitable event handle for the fence
 		{
@@ -512,75 +499,19 @@ struct render_data
 		och::print("Finished\n");
 	}
 
-	void init_debug()
-	{
-#ifdef GRAPHICS_DEBUG
-
-		check(D3D12GetDebugInterface(IID_PPV_ARGS(&m_debug_interface)));
-
-		m_debug_interface->EnableDebugLayer();
-
-#endif
-	}
-
-	void init_window(uint32_t width, uint32_t height, const wchar_t* title)
-	{
-		m_window_width = width;
-		m_window_height = height;
-		m_window_title = title;
-
-		WNDCLASSEXW window_class{};
-
-		window_class.cbSize = sizeof(window_class);
-		window_class.style = CS_VREDRAW | CS_HREDRAW;
-		window_class.lpfnWndProc = window_function;
-		window_class.hInstance = GetModuleHandleW(nullptr);
-		window_class.lpszClassName = m_window_class_name;
-		RegisterClassExW(&window_class);
-
-		int32_t screen_width = GetSystemMetrics(SM_CXSCREEN);
-
-		int32_t screen_height = GetSystemMetrics(SM_CYSCREEN);
-
-		RECT window_rect = { 0, 0, static_cast<LONG>(m_window_width), static_cast<LONG>(m_window_height) };
-
-		AdjustWindowRect(&window_rect, WS_OVERLAPPEDWINDOW, FALSE);
-
-		int32_t actual_width = window_rect.right - window_rect.left;
-
-		int32_t actual_height = window_rect.bottom - window_rect.top;
-
-		// Center the window within the screen. Clamp to 0, 0 for the top-left corner.
-		int32_t window_x = (screen_width - actual_width) >> 1;
-		if (window_x < 0) window_x = 0;
-
-		int32_t window_y = (screen_height - actual_height) >> 1;
-		if (window_y < 0) window_y = 0;
-
-		m_window = CreateWindowExW(0, m_window_class_name, m_window_title, WS_OVERLAPPEDWINDOW, window_x, window_y, actual_width, actual_height, nullptr, nullptr, GetModuleHandleW(nullptr), nullptr);
-
-		SetWindowLongPtrW(m_window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(this));
-
-		GetWindowRect(m_window, &m_window_rect);
-	}
-
-	void map_fence_to_cuda()
-	{
-		check(m_device->CreateSharedHandle(m_fence.Get(), nullptr, GENERIC_ALL, nullptr, &m_cu_fence_shared_handle));
-
-		cudaExternalSemaphoreHandleDesc fence_desc{};
-		fence_desc.type = cudaExternalSemaphoreHandleTypeD3D12Fence;
-		fence_desc.handle.win32.handle = m_cu_fence_shared_handle;
-		fence_desc.flags = 0;
-
-		check(cudaImportExternalSemaphore(&m_cu_fence, &fence_desc));
-	}
-
-	void map_backbuffers_to_cuda()
+	void update_backbuffers_for_cuda()
 	{
 		for (int32_t i = 0; i != m_frame_cnt; ++i)
 		{
-			check(m_device->CreateSharedHandle(m_backbuffers[i].Get(), nullptr, GENERIC_ALL, nullptr, (m_cu_backbuffer_shared_handles + i)));
+			//Close previous state
+			check(cudaDestroyExternalMemory(m_cu_backbuffer_ext_mem[i]));
+			
+			CloseHandle(m_cu_backbuffer_shared_handles[i]);
+
+			check(cudaFree(m_cu_backbuffers[i]));
+
+			//Start creating new state
+			check(m_device->CreateSharedHandle(m_backbuffers[i], nullptr, GENERIC_ALL, nullptr, (m_cu_backbuffer_shared_handles + i)));
 
 			D3D12_RESOURCE_DESC buffer_desc = m_backbuffers[i]->GetDesc();
 
@@ -603,250 +534,24 @@ struct render_data
 		}
 	}
 
-	LUID set_best_cuda_device_idx()
+	void update_rtvs()
 	{
-		int32_t cuda_dev_cnt;
-
-		check(cudaGetDeviceCount(&cuda_dev_cnt));
-
-		int32_t best_major_ver = -1;
-		int32_t best_minor_ver = -1;
-		int32_t best_sm_cnt = -1;
-		uint64_t best_gmem_bytes = 0;
-
-		uint32_t best_idx = -1;
-
-		union
-		{
-			char cuda[8];
-			LUID d3d12{ (DWORD)~0, (LONG)~0 };
-		} luid;
-
-		for (int32_t i = 0; i != cuda_dev_cnt; ++i)
-		{
-			cudaDeviceProp prop;
-
-			cudaError_t e2 = cudaGetDeviceProperties(&prop, i);
-
-			if (e2 != cudaSuccess)
-				check(e2);
-
-			if (prop.major >= best_major_ver && prop.minor >= best_minor_ver && prop.multiProcessorCount >= best_sm_cnt && prop.totalGlobalMem >= best_gmem_bytes)
-			{
-				best_major_ver = prop.major;
-				best_minor_ver = prop.minor;
-				best_sm_cnt = prop.multiProcessorCount;
-				best_gmem_bytes = prop.totalGlobalMem;
-
-				best_idx = i;
-
-				for (int j = 0; j != 8; ++j)
-					luid.cuda[j] = prop.luid[j];
-			}
-		}
-
-		cudaSetDevice(best_idx);
-
-		return luid.d3d12;
-	}
-
-	comptr<IDXGIFactory4> create_dxgi_factory()
-	{
-		comptr<IDXGIFactory4> dxgi_factory;
-
-		UINT factory_flags = 0;
-
-#ifdef GRAPHICS_DEBUG
-		factory_flags = DXGI_CREATE_FACTORY_DEBUG;
-#endif // GRAPHICS_DEBUG
-
-		check(CreateDXGIFactory2(factory_flags, IID_PPV_ARGS(&dxgi_factory)));
-
-		return dxgi_factory;
-	}
-
-	comptr<IDXGIAdapter4> get_adapter_by_luid(LUID luid, const comptr<IDXGIFactory4>& factory)
-	{
-		comptr<IDXGIAdapter1> adapter_1;
-
-		comptr<IDXGIAdapter4> adapter_4;
-
-		check(factory->EnumAdapterByLuid(luid, IID_PPV_ARGS(&adapter_1)));
-
-		//Check if the chosen device actually supports D3D12
-		check(D3D12CreateDevice(adapter_1.Get(), D3D_FEATURE_LEVEL_11_0, _uuidof(ID3D12Device), nullptr));
-
-		check(adapter_1.As(&adapter_4));
-
-		return adapter_4;
-	}
-
-	comptr<ID3D12Device2> create_d3d12_device(const comptr<IDXGIAdapter4>& adapter)
-	{
-		comptr<ID3D12Device2> device;
-
-		check(D3D12CreateDevice(adapter.Get(), D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&device)));
-
-#ifdef GRAPHICS_DEBUG
-
-		//Set up warnings
-		comptr<ID3D12InfoQueue> info_queue;
-
-		check(device.As(&info_queue));
-
-		info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
-		info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
-		info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true);
-
-		D3D12_MESSAGE_SEVERITY info_severity = D3D12_MESSAGE_SEVERITY_INFO;
-
-		D3D12_INFO_QUEUE_FILTER message_filter{};
-
-		message_filter.DenyList.pSeverityList = &info_severity;
-		message_filter.DenyList.NumSeverities = 1;
-
-		check(info_queue->PushStorageFilter(&message_filter));
-
-#endif // GRAPHICS_DEBUG
-
-		return device;
-	}
-
-	comptr<ID3D12CommandQueue> create_d3d12_command_queue(const comptr<ID3D12Device2>& device, D3D12_COMMAND_LIST_TYPE type)
-	{
-		comptr<ID3D12CommandQueue> command_queue;
-
-		D3D12_COMMAND_QUEUE_DESC queue_desc{};
-
-		queue_desc.Type = type;
-		queue_desc.Priority = D3D12_COMMAND_QUEUE_PRIORITY_NORMAL;
-		queue_desc.Flags = D3D12_COMMAND_QUEUE_FLAG_NONE;
-		queue_desc.NodeMask = 0;
-
-		check(device->CreateCommandQueue(&queue_desc, IID_PPV_ARGS(&command_queue)));
-
-		return command_queue;
-	}
-
-	bool has_tearing_support(const comptr<IDXGIFactory4>& factory)
-	{
-		comptr<IDXGIFactory5> factory_5;
-
-		check(factory.As(&factory_5));
-
-		BOOL is_allowed;
-
-		if (FAILED(factory_5->CheckFeatureSupport(DXGI_FEATURE_PRESENT_ALLOW_TEARING, &is_allowed, sizeof(is_allowed))))
-			return false;
-
-		return is_allowed;
-	}
-
-	comptr<IDXGISwapChain4> create_swapchain(HWND window, const comptr<ID3D12CommandQueue>& command_queue, int32_t w, int32_t h, int32_t buffer_cnt, const comptr<IDXGIFactory4>& factory)
-	{
-		comptr<IDXGISwapChain4> swapchain;
-
-		uint32_t factory_flags = 0;
-
-		DXGI_SWAP_CHAIN_DESC1 swapchain_desc{};
-
-		swapchain_desc.Width = w;
-		swapchain_desc.Height = h;
-		swapchain_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-		swapchain_desc.Stereo = false;
-		swapchain_desc.SampleDesc = { 1, 0 };
-		swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-		swapchain_desc.BufferCount = buffer_cnt;
-		swapchain_desc.Scaling = DXGI_SCALING_STRETCH;//CUSTOMIZE
-		swapchain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-		swapchain_desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;//CUSTOM
-		if (m_supports_tearing)
-			swapchain_desc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
-
-		comptr<IDXGISwapChain1> swapchain_1;
-
-		check(factory->CreateSwapChainForHwnd(command_queue.Get(), window, &swapchain_desc, nullptr, nullptr, &swapchain_1));
-
-		check(factory->MakeWindowAssociation(m_window, DXGI_MWA_NO_ALT_ENTER));
-
-		check(swapchain_1.As(&swapchain));
-
-		return swapchain;
-	}
-
-	comptr<ID3D12DescriptorHeap> create_descriptor_heap(const comptr<ID3D12Device2>& device, D3D12_DESCRIPTOR_HEAP_TYPE type, uint32_t descriptor_cnt)
-	{
-		comptr<ID3D12DescriptorHeap> heap;
-
-		D3D12_DESCRIPTOR_HEAP_DESC heap_desc{};
-
-		heap_desc.NumDescriptors = descriptor_cnt;
-		heap_desc.Type = type;
-		heap_desc.Flags = D3D12_DESCRIPTOR_HEAP_FLAG_NONE;
-		heap_desc.NodeMask = 0;
-
-		check(device->CreateDescriptorHeap(&heap_desc, IID_PPV_ARGS(&heap)));
-
-		return heap;
-	}
-
-	void update_rtvs(const comptr<ID3D12Device2>& device, const comptr<IDXGISwapChain4>& swapchain, const comptr<ID3D12DescriptorHeap>& heap)
-	{
-		CD3DX12_CPU_DESCRIPTOR_HANDLE rtv_handle(heap->GetCPUDescriptorHandleForHeapStart());
+		CD3DX12_CPU_DESCRIPTOR_HANDLE rtv_handle(m_rtv_desc_heap->GetCPUDescriptorHandleForHeapStart());
 
 		for (int32_t i = 0; i != m_frame_cnt; ++i)
 		{
-			comptr<ID3D12Resource> backbuffer;
+			ID3D12Resource* backbuffer;
 
-			check(swapchain->GetBuffer(i, IID_PPV_ARGS(&backbuffer)));
+			check(m_swapchain->GetBuffer(i, IID_PPV_ARGS(&backbuffer)));
 
-			device->CreateRenderTargetView(backbuffer.Get(), nullptr, rtv_handle);
+			m_device->CreateRenderTargetView(backbuffer, nullptr, rtv_handle);
 
 			m_backbuffers[i] = backbuffer;
 
 			rtv_handle.Offset(m_rtv_desc_size);
 		}
 
-		map_backbuffers_to_cuda();
-	}
-
-	comptr<ID3D12CommandAllocator> create_command_allocator(const comptr<ID3D12Device2>& device, D3D12_COMMAND_LIST_TYPE type)
-	{
-		comptr<ID3D12CommandAllocator> command_allocator;
-
-		check(device->CreateCommandAllocator(type, IID_PPV_ARGS(&command_allocator)));
-
-		return command_allocator;
-	}
-
-	comptr<ID3D12GraphicsCommandList> create_command_list(const comptr<ID3D12Device2>& device, const comptr<ID3D12CommandAllocator>& allocator, D3D12_COMMAND_LIST_TYPE type)
-	{
-		comptr<ID3D12GraphicsCommandList> command_list;
-
-		check(device->CreateCommandList(0, type, allocator.Get(), nullptr, IID_PPV_ARGS(&command_list)));
-
-		check(command_list->Close());
-
-		return command_list;
-	}
-	
-	comptr<ID3D12Fence> create_fence(const comptr<ID3D12Device2>& device, const D3D12_FENCE_FLAGS flags, uint64_t initial_value = 0)
-	{
-		comptr<ID3D12Fence> fence;
-
-		device->CreateFence(initial_value, flags, IID_PPV_ARGS(&fence));
-
-		return fence;
-	}
-
-	HANDLE create_event_handle()
-	{
-		HANDLE fence_event = CreateEventW(nullptr, false, false, nullptr);
-
-		if (!fence_event)
-			panic("Could not create fence-event");
-
-		return fence_event;
+		update_backbuffers_for_cuda();
 	}
 
 	uint64_t signal(const comptr<ID3D12CommandQueue>& queue, const comptr<ID3D12Fence>& fence, uint64_t& fence_value)
@@ -988,7 +693,7 @@ struct render_data
 
 		check(m_cmd_list->Close());
 
-		ID3D12CommandList* const cmd_lists[]{ m_cmd_list.Get() };
+		ID3D12CommandList* const cmd_lists[]{ m_cmd_list };
 
 		m_cmd_queue->ExecuteCommandLists(1, cmd_lists);
 
@@ -1014,7 +719,7 @@ struct render_data
 
 		for (int32_t i = 0; i != m_frame_cnt; ++i)
 		{
-			m_backbuffers[i].Reset();
+			m_backbuffers[i]->Release();
 
 			m_frame_fence_values[i] = m_frame_fence_values[m_curr_frame];
 		}
@@ -1027,7 +732,7 @@ struct render_data
 
 		m_curr_frame = m_swapchain->GetCurrentBackBufferIndex();
 
-		update_rtvs(m_device, m_swapchain, m_rtv_desc_heap);
+		update_rtvs();
 	}
 
 	void set_fullscreen(bool fullscreen)
