@@ -42,10 +42,10 @@ void init_voxels(const uint32_t dim_log2, float noise_limit, uint32_t noise_seed
 	for (int i = 0; i != 16 * 16 * 16; ++i)
 	{
 		d_simplex_3d_uint8_t<<<threads_per_block, blocks_per_grid>>>(d_voxel_lin, make_uint3(dim, dim, dim), make_float3(0.0F, 0.0F, 0.0F), make_float3(16.0F / dim, 16.0F / dim, 1.0F / dim), i);
-		cudaDeviceSynchronize();
 		cudaError_t err = cudaGetLastError();
 		if (err != cudaSuccess)
-			printf("Error (loop #%d): %s\n", i, cudaGetErrorString(err));
+			och::print("Error (loop #{}): {}\n", i, cudaGetErrorString(err));
+		cudaDeviceSynchronize();
 	}
 
 	och::print("\n{} for {}^3 noise-calls\n", dev_fill_timer.read(), dim);
