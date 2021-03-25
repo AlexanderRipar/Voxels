@@ -3,12 +3,10 @@
 #include <cstdint>
 #include <cmath>
 
-#include "cuda.h"
-#include "cuda_texture_types.h"
-#include "cuda_runtime_api.h"
-#include "cuda_runtime.h"
+#include "cuda_d3d11_interop.h"
+#include "cuda_d3d10_interop.h"
+
 #include "device_launch_parameters.h"
-#include "channel_descriptor.h"
 
 //__constant__ float d_grad3[12][3]
 //{
@@ -54,7 +52,7 @@ inline __device__ float d_dot_with_hashed_vec(float i, float j, float k, float x
 	return __int_as_float(a ^ neg1) + __int_as_float(b ^ neg2);
 }
 
-__global__ void d_simplex_3d_float(cudaPitchedPtr out, uint3 dim, float3 begin, float3 step, uint32_t seed)
+__global__ void d_simplex_3d_float(cudaPitchedPtr dst, uint3 dim, float3 begin, float3 step, uint32_t seed)
 {
 	const uint32_t idx_x = blockIdx.x * blockDim.x + threadIdx.x;
 	const uint32_t idx_y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -120,12 +118,12 @@ __global__ void d_simplex_3d_float(cudaPitchedPtr out, uint3 dim, float3 begin, 
 	t3 = t3 * t3 * t3 * t3 * d_dot_with_hashed_vec(1.0F + i0, 1.0F + j0, 1.0F + k0, x3, y3, z3, seed);
 
 	//76.0F maps to just within [-1.0F, 1.0F]
-	reinterpret_cast<float*>(out.ptr)[idx_x + idx_y * out.pitch + idx_z * out.pitch * out.ysize] = 76.0F * (t0 + t1 + t2 + t3);
+	reinterpret_cast<float*>(dst.ptr)[idx_x + idx_y * dst.pitch + idx_z * dst.pitch * dst.ysize] = 76.0F * (t0 + t1 + t2 + t3);
 
 	return;
 }
 
-__global__ void d_simplex_3d_uint8_t(cudaPitchedPtr out, uint3 dim, float3 begin, float3 step, uint32_t seed)
+__global__ void d_simplex_3d_uint8_t(cudaPitchedPtr dst, uint3 dim, float3 begin, float3 step, uint32_t seed)
 {
 	const uint32_t idx_x = blockIdx.x * blockDim.x + threadIdx.x;
 	const uint32_t idx_y = blockIdx.y * blockDim.y + threadIdx.y;
@@ -195,7 +193,7 @@ __global__ void d_simplex_3d_uint8_t(cudaPitchedPtr out, uint3 dim, float3 begin
 	if (t3 < 0.0F) t3 = 0.0F;
 	t3 = t3 * t3 * t3 * t3 * d_dot_with_hashed_vec(1.0F + i0, 1.0F + j0, 1.0F + k0, x3, y3, z3, seed);
 
-	reinterpret_cast<uint8_t*>(out.ptr)[idx_x + idx_y * out.pitch + idx_z * out.pitch * out.ysize] = (76.0F * (t0 + t1 + t2 + t3)) * 128 + 128;
+	reinterpret_cast<uint8_t*>(dst.ptr)[idx_x + idx_y * dst.pitch + idx_z * dst.pitch * dst.ysize] = (76.0F * (t0 + t1 + t2 + t3)) * 128 + 128;
 
 	return;
 }
