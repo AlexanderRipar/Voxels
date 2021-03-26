@@ -12,11 +12,9 @@
 
 #include <d3d12.h>
 #include <dxgi1_6.h>
-#include <D3Dcompiler.h>
-#include <DirectXMath.h>
+//#include <D3Dcompiler.h>
+//#include <DirectXMath.h>
 #include "d3dx12.h"
-
-#include <wrl.h>
 
 #include "cuda_runtime.h"
 #include "cuda_runtime_api.h"
@@ -29,9 +27,6 @@
 
 //DEBUG SWITCH
 #define GRAPHICS_DEBUG
-
-template<typename T>
-using comptr = Microsoft::WRL::ComPtr<T>;
 
 void dump_and_flee(uint64_t error_number, const char* error_name, const char* error_desc, const char* src_file, int line_number)
 {
@@ -88,15 +83,19 @@ LRESULT CALLBACK window_function(HWND window, UINT msg, WPARAM wp, LPARAM lp);
 
 struct render_data
 {
+
+	/*////////////////////////////////////////////////////////////////////////*/
+	/*//////////////////////////////////DATA//////////////////////////////////*/
+	/*////////////////////////////////////////////////////////////////////////*/
+
 	static constexpr uint8_t m_frame_cnt = 2;
 
 	static constexpr const wchar_t* m_window_class_name = L"OCHVXWN";
-	uint16_t m_window_width = 1280;
-	uint16_t m_window_height = 720;
 	const wchar_t* m_window_title;
 	HWND m_window;
 	RECT m_window_rect;
 
+	//RENDER STATE
 	ID3D12Device2* m_device;
 	ID3D12CommandQueue* m_cmd_queue;
 	IDXGISwapChain4* m_swapchain;
@@ -105,35 +104,45 @@ struct render_data
 	ID3D12CommandAllocator* m_cmd_allocators[m_frame_cnt];
 	ID3D12DescriptorHeap* m_rtv_desc_heap;
 
-	uint16_t m_rtv_desc_size;
-	uint8_t m_curr_frame = 0;
-
 	ID3D12Fence* m_fence;
-	uint64_t m_fence_value = 0;
-	uint64_t m_frame_fence_values[m_frame_cnt]{};
+	uint64_t m_fence_values[m_frame_cnt]{};
+	uint64_t m_curr_fence_value = 0;
 	HANDLE m_fence_event;
 
+	//TEMPORAL RENDER STATE
+	uint16_t m_rtv_desc_size;
+	uint16_t m_window_width = 1280;
+	uint16_t m_window_height = 720;
+	uint8_t m_curr_frame = 0;
+
+	//FLAGS
 	bool m_vsync = true;
 	bool m_supports_tearing;
 	bool m_is_fullscreen = false;
 	bool m_is_initialized = false;
 
+	//INPUT
 	uint64_t m_keystates[4]{};
 	int16_t m_mouse_x;
 	int16_t m_mouse_y;
 	int16_t m_mouse_scroll;
 	int16_t m_mouse_h_scroll;
 
-	//TODO
+	//CUDA INTEROP
 	cudaExternalMemory_t m_cu_backbuffer_ext_mem[m_frame_cnt];
 	uint32_t* m_cu_backbuffers[m_frame_cnt];
 	cudaExternalSemaphore_t m_cu_fence;
-	HANDLE m_cu_backbuffer_shared_handles[m_frame_cnt];//Only used for deleting
-	HANDLE m_cu_fence_shared_handle;//Only used for deleting
+	HANDLE m_cu_backbuffer_shared_handles[m_frame_cnt];
+	HANDLE m_cu_fence_shared_handle;
 
+	//D3D12 DEBUG
 #ifdef GRAPHICS_DEBUG
-	comptr<ID3D12Debug> m_debug_interface;
+	ID3D12Debug* m_debug_interface;
 #endif
+
+	/*////////////////////////////////////////////////////////////////////////*/
+	/*///////////////////////////////CTOR / DTOR//////////////////////////////*/
+	/*////////////////////////////////////////////////////////////////////////*/
 
 	render_data(uint32_t width, uint32_t height, const wchar_t* title)
 	{
@@ -273,10 +282,10 @@ struct render_data
 			dxgi_factory_5->Release();
 		}
 
-		IDXGIAdapter4* dxgi_adapter;
-
-		//Get the DXGI adapter corresponding to the luid of the previously selected cuda-device, and save it in the above pointer
+		//Get the DXGI adapter  corresponding to the luid of the previously selected cuda-device and use it to create a D3D12-Device
 		{
+			IDXGIAdapter4* dxgi_adapter;
+
 			IDXGIAdapter1* adapter_1;
 
 			check(dxgi_factory->EnumAdapterByLuid(luid.d3d12, IID_PPV_ARGS(&adapter_1)));
@@ -286,18 +295,13 @@ struct render_data
 
 			check(adapter_1->QueryInterface(&dxgi_adapter));
 
-			adapter_1->Release();
-		}
-
-		//Create D3D12-Device from DXGI adapter
-		{
 			check(D3D12CreateDevice(dxgi_adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_device)));
 
 #ifdef GRAPHICS_DEBUG
 
 			//Set up warnings
 			ID3D12InfoQueue* info_queue;
-			
+
 			check(m_device->QueryInterface(&info_queue));
 
 			info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
@@ -315,6 +319,10 @@ struct render_data
 			info_queue->Release();
 
 #endif // GRAPHICS_DEBUG
+
+			adapter_1->Release();
+
+			dxgi_adapter->Release();
 		}
 
 		//Create D3D12 command-queue
@@ -371,11 +379,11 @@ struct render_data
 
 			check(m_device->CreateDescriptorHeap(&heap_desc, IID_PPV_ARGS(&m_rtv_desc_heap)));
 		}
-		
+
 		//Query size of RTV descriptors created above
 		m_rtv_desc_size = m_device->GetDescriptorHandleIncrementSize(D3D12_DESCRIPTOR_HEAP_TYPE_RTV);
 
-		//Bind backbuffers to swapchain
+		//Bind backbuffers to swapchain and to local reference
 		{
 			CD3DX12_CPU_DESCRIPTOR_HANDLE rtv_handle(m_rtv_desc_heap->GetCPUDescriptorHandleForHeapStart());
 
@@ -393,12 +401,14 @@ struct render_data
 			}
 		}
 
-		//for (int32_t i = 0; i != m_frame_cnt; ++i)
-		//	m_cmd_allocators[i] = create_command_allocator(m_device, D3D12_COMMAND_LIST_TYPE_DIRECT);
+		//Map backbuffers to cuda
+		map_backbuffers_for_cuda();
 
 		//Create command allocators for each backbuffer, to allow cycling through them
+		{
 			for (int32_t i = 0; i != m_frame_cnt; ++i)
 				check(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS((m_cmd_allocators + i))));
+		}
 
 		//Create command list, which initially uses the allocator corresponding to the swapchain's current backbuffer
 		{
@@ -430,13 +440,13 @@ struct render_data
 				panic("Could not create fence-event");
 		}
 
+		//Release temporary COM-Interfaces
+		dxgi_factory->Release();
+
 		//Indicate initialization has finished
 		m_is_initialized = true;
 
-		//Release temporary COM-Interfaces
-		dxgi_factory->Release();
-		dxgi_adapter->Release();
-
+		//Finito output
 		och::print("Finished in {}\n", initialization_timer.read());
 	}
 
@@ -475,8 +485,17 @@ struct render_data
 
 		m_device->Release();
 
+#ifdef GRAPHICS_DEBUG
+		m_debug_interface->Release();
+#endif // GRAPHICS_DEBUG
+
+
 		CloseHandle(m_fence_event);
 	}
+
+	/*////////////////////////////////////////////////////////////////////////*/
+	/*/////////////////////////RENDERING AND HELPERS//////////////////////////*/
+	/*////////////////////////////////////////////////////////////////////////*/
 
 	void run()
 	{
@@ -492,25 +511,27 @@ struct render_data
 			DispatchMessageW(&msg);
 		}
 
-		flush(m_cmd_queue, m_fence, m_fence_value, m_fence_event);
-
-		CloseHandle(m_fence_event);
+		wait_for_gpu();
 
 		och::print("Finished\n");
 	}
 
-	void update_backbuffers_for_cuda()
+	void unmap_backbuffers_for_cuda()
 	{
 		for (int32_t i = 0; i != m_frame_cnt; ++i)
 		{
-			//Close previous state
 			check(cudaDestroyExternalMemory(m_cu_backbuffer_ext_mem[i]));
-			
+
 			CloseHandle(m_cu_backbuffer_shared_handles[i]);
 
 			check(cudaFree(m_cu_backbuffers[i]));
+		}
+	}
 
-			//Start creating new state
+	void map_backbuffers_for_cuda()
+	{
+		for (int32_t i = 0; i != m_frame_cnt; ++i)
+		{
 			check(m_device->CreateSharedHandle(m_backbuffers[i], nullptr, GENERIC_ALL, nullptr, (m_cu_backbuffer_shared_handles + i)));
 
 			D3D12_RESOURCE_DESC buffer_desc = m_backbuffers[i]->GetDesc();
@@ -551,33 +572,42 @@ struct render_data
 			rtv_handle.Offset(m_rtv_desc_size);
 		}
 
-		update_backbuffers_for_cuda();
+		unmap_backbuffers_for_cuda();
+
+		map_backbuffers_for_cuda();
 	}
 
-	uint64_t signal(const comptr<ID3D12CommandQueue>& queue, const comptr<ID3D12Fence>& fence, uint64_t& fence_value)
+	//uint64_t signal(ID3D12CommandQueue* queue, ID3D12Fence* fence, uint64_t& fence_value)
+	//{
+	//	uint64_t value_for_signal = ++fence_value;
+	//
+	//	check(queue->Signal(fence, value_for_signal));
+	//
+	//	return fence_value;
+	//}
+
+	//void wait_for_fence(ID3D12Fence* fence, uint64_t value_to_await, HANDLE fence_event)
+	//{
+	//	if (fence->GetCompletedValue() < value_to_await)
+	//	{
+	//		check(fence->SetEventOnCompletion(value_to_await, fence_event));
+	//
+	//		WaitForSingleObject(fence_event, INFINITE);
+	//	}
+	//}
+
+	void wait_for_gpu()
 	{
-		uint64_t value_for_signal = ++fence_value;
+		++m_fence_values[m_curr_frame];
 
-		check(queue->Signal(fence.Get(), value_for_signal));
+		check(m_cmd_queue->Signal(m_fence, m_fence_values[m_curr_frame]));
 
-		return fence_value;
-	}
-
-	void wait_for_fence(const comptr<ID3D12Fence>& fence, uint64_t value_to_await, HANDLE fence_event)
-	{
-		if (fence->GetCompletedValue() < value_to_await)
+		if (m_fence->GetCompletedValue() < m_fence_values[m_curr_frame])
 		{
-			check(fence->SetEventOnCompletion(value_to_await, fence_event));
+			check(m_fence->SetEventOnCompletion(m_fence_values[m_curr_frame], m_fence_event));
 
-			WaitForSingleObject(fence_event, INFINITE);
+			WaitForSingleObject(m_fence_event, INFINITE);
 		}
-	}
-
-	void flush(const comptr<ID3D12CommandQueue>& queue, const comptr<ID3D12Fence>& fence, uint64_t& fence_value, HANDLE fence_event)
-	{
-		uint64_t value_for_signal = signal(queue, fence, fence_value);
-
-		wait_for_fence(fence, value_for_signal, fence_event);
 	}
 
 	void update()
@@ -601,15 +631,19 @@ struct render_data
 
 	void render()
 	{
-		const comptr<ID3D12CommandAllocator>& cmd_allocator = m_cmd_allocators[m_curr_frame];
-		const comptr<ID3D12Resource>& backbuffer = m_backbuffers[m_curr_frame];
+		//WAIT FOR FRAME TO FINISH
+		//PRESENT
+		//RENDER
+
+		ID3D12CommandAllocator* cmd_allocator = m_cmd_allocators[m_curr_frame];
+		ID3D12Resource* backbuffer = m_backbuffers[m_curr_frame];
 		
 		cmd_allocator->Reset();
 
-		m_cmd_list->Reset(cmd_allocator.Get(), nullptr);
+		m_cmd_list->Reset(cmd_allocator, nullptr);
 
 		//Render
-		CD3DX12_RESOURCE_BARRIER clear_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer.Get(), D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		CD3DX12_RESOURCE_BARRIER clear_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
 		m_cmd_list->ResourceBarrier(1, &clear_barrier);
 
@@ -619,9 +653,9 @@ struct render_data
 		//
 		//m_cmd_list->ClearRenderTargetView(rtv, clear_colour, 0, nullptr);
 
-		////////////////////////////////////////////////////////////////////////
-		//////////////////////////////////CUDA//////////////////////////////////
-		////////////////////////////////////////////////////////////////////////
+		/*////////////////////////////////////////////////////////////////////////*/
+		/*//////////////////////////////////CUDA//////////////////////////////////*/
+		/*////////////////////////////////////////////////////////////////////////*/
 
 		//HANDLE backbuffer_handle;
 		//
@@ -682,12 +716,12 @@ struct render_data
 		//
 		//CloseHandle(backbuffer_handle);
 
-		////////////////////////////////////////////////////////////////////////
-		////////////////////////////////END CUDA////////////////////////////////
-		////////////////////////////////////////////////////////////////////////
+		/*////////////////////////////////////////////////////////////////////////*/
+		/*////////////////////////////////END CUDA////////////////////////////////*/
+		/*////////////////////////////////////////////////////////////////////////*/
 
 		//Present
-		CD3DX12_RESOURCE_BARRIER present_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer.Get(), D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+		CD3DX12_RESOURCE_BARRIER present_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 
 		m_cmd_list->ResourceBarrier(1, &present_barrier);
 
@@ -703,11 +737,19 @@ struct render_data
 
 		check(m_swapchain->Present(sync_interval, present_flags));
 
-		m_frame_fence_values[m_curr_frame] = signal(m_cmd_queue, m_fence, m_fence_value);
+		//Signal fence on completion of 'Present'
+		check(m_cmd_queue->Signal(m_fence, ++m_curr_fence_value));
+		m_fence_values[m_curr_frame] = m_curr_fence_value;
 
 		m_curr_frame = m_swapchain->GetCurrentBackBufferIndex();
 
-		wait_for_fence(m_fence, m_frame_fence_values[m_curr_frame], m_fence_event);
+		//Wait for current buffer to complete. TODO: Could be moved to top of function, to minimize blocking
+		if (m_fence->GetCompletedValue() < m_fence_values[m_curr_frame])
+		{
+			check(m_fence->SetEventOnCompletion(m_fence_values[m_curr_frame], m_fence_event));
+		
+			WaitForSingleObject(m_fence_event, INFINITE);
+		}
 	}
 
 	void resize(uint16_t new_width, uint16_t new_height)
@@ -715,13 +757,13 @@ struct render_data
 		m_window_width = new_width;
 		m_window_height = new_height;
 
-		flush(m_cmd_queue, m_fence, m_fence_value, m_fence_event);
+		wait_for_gpu();
 
 		for (int32_t i = 0; i != m_frame_cnt; ++i)
 		{
 			m_backbuffers[i]->Release();
 
-			m_frame_fence_values[i] = m_frame_fence_values[m_curr_frame];
+			m_fence_values[i] = m_fence_values[m_curr_frame];
 		}
 
 		DXGI_SWAP_CHAIN_DESC swapchain_desc{};
@@ -773,6 +815,12 @@ struct render_data
 			ShowWindow(m_window, SW_NORMAL);
 		}
 	}
+
+
+
+	/*////////////////////////////////////////////////////////////////////////*/
+	/*/////////////////////////////INPUT / OUTPUT/////////////////////////////*/
+	/*////////////////////////////////////////////////////////////////////////*/
 
 	void set_key(uint8_t vk) noexcept
 	{
