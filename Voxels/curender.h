@@ -23,7 +23,8 @@
 
 #include "och_lib.h"
 
-#include "och_setints_gpu.cuh"
+//#include "och_setints_gpu.cuh"
+#include "och_simplex_noise_gpu.cuh"
 
 //DEBUG SWITCH
 #define GRAPHICS_DEBUG
@@ -129,8 +130,8 @@ struct render_data
 	int16_t m_mouse_h_scroll;
 
 	//CUDA INTEROP
-	cudaExternalMemory_t m_cu_backbuffer_ext_mem[m_frame_cnt];
-	uint32_t* m_cu_backbuffers[m_frame_cnt];
+	cudaExternalMemory_t m_cu_external_memory_handles[m_frame_cnt];
+	cudaSurfaceObject_t m_cu_surfaces[m_frame_cnt];
 	cudaExternalSemaphore_t m_cu_fence;
 	HANDLE m_cu_backbuffer_shared_handles[m_frame_cnt];
 	HANDLE m_cu_fence_shared_handle;
@@ -159,11 +160,13 @@ struct render_data
 
 		//Initialize D3D12 Debugger
 		{
-#ifdef GRAPHICS_DEBUG
-			check(D3D12GetDebugInterface(IID_PPV_ARGS(&m_debug_interface)));
+			#ifdef GRAPHICS_DEBUG
 
-			m_debug_interface->EnableDebugLayer();
-#endif // GRAPHICS_DEBUG
+				check(D3D12GetDebugInterface(IID_PPV_ARGS(&m_debug_interface)));
+
+				m_debug_interface->EnableDebugLayer();
+
+			#endif // GRAPHICS_DEBUG
 		}
 
 		union
@@ -259,9 +262,11 @@ struct render_data
 		{
 			uint32_t factory_flags = 0;
 
-#ifdef GRAPHICS_DEBUG
-			factory_flags = DXGI_CREATE_FACTORY_DEBUG;
-#endif // GRAPHICS_DEBUG
+			#ifdef GRAPHICS_DEBUG
+
+				factory_flags = DXGI_CREATE_FACTORY_DEBUG;
+
+			#endif // GRAPHICS_DEBUG
 
 			check(CreateDXGIFactory2(factory_flags, IID_PPV_ARGS(&dxgi_factory)));
 		}
@@ -297,28 +302,28 @@ struct render_data
 
 			check(D3D12CreateDevice(dxgi_adapter, D3D_FEATURE_LEVEL_11_0, IID_PPV_ARGS(&m_device)));
 
-#ifdef GRAPHICS_DEBUG
+			#ifdef GRAPHICS_DEBUG
 
-			//Set up warnings
-			ID3D12InfoQueue* info_queue;
+				//Set up warnings
+				ID3D12InfoQueue* info_queue;
 
-			check(m_device->QueryInterface(&info_queue));
+				check(m_device->QueryInterface(&info_queue));
 
-			info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
-			info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
-			info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true);
+				info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_CORRUPTION, true);
+				info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_ERROR, true);
+				info_queue->SetBreakOnSeverity(D3D12_MESSAGE_SEVERITY_WARNING, true);
 
-			D3D12_MESSAGE_SEVERITY info_severity = D3D12_MESSAGE_SEVERITY_INFO;
+				D3D12_MESSAGE_SEVERITY info_severity = D3D12_MESSAGE_SEVERITY_INFO;
 
-			D3D12_INFO_QUEUE_FILTER message_filter{};
-			message_filter.DenyList.pSeverityList = &info_severity;
-			message_filter.DenyList.NumSeverities = 1;
+				D3D12_INFO_QUEUE_FILTER message_filter{};
+				message_filter.DenyList.pSeverityList = &info_severity;
+				message_filter.DenyList.NumSeverities = 1;
 
-			check(info_queue->PushStorageFilter(&message_filter));
+				check(info_queue->PushStorageFilter(&message_filter));
 
-			info_queue->Release();
+				info_queue->Release();
 
-#endif // GRAPHICS_DEBUG
+			#endif // GRAPHICS_DEBUG
 
 			adapter_1->Release();
 
@@ -401,7 +406,7 @@ struct render_data
 			}
 		}
 
-		//Map backbuffers to cuda
+		//Map backbuffers for access by cuda
 		map_backbuffers_for_cuda();
 
 		//Create command allocators for each backbuffer, to allow cycling through them
@@ -453,12 +458,7 @@ struct render_data
 	~render_data()
 	{
 		//Cuda stuff
-		for (int32_t i = 0; i != m_frame_cnt; ++i)
-		{
-			cudaDestroyExternalMemory(m_cu_backbuffer_ext_mem[i]);
-
-			CloseHandle(m_cu_backbuffer_shared_handles[i]);
-		}
+		unmap_backbuffers_for_cuda();
 
 		cudaDestroyExternalSemaphore(m_cu_fence);
 
@@ -520,11 +520,10 @@ struct render_data
 	{
 		for (int32_t i = 0; i != m_frame_cnt; ++i)
 		{
-			check(cudaDestroyExternalMemory(m_cu_backbuffer_ext_mem[i]));
+			//This call also invalidates all arrays and surfaces created from this external memory
+			check(cudaDestroyExternalMemory(m_cu_external_memory_handles[i]));
 
 			CloseHandle(m_cu_backbuffer_shared_handles[i]);
-
-			check(cudaFree(m_cu_backbuffers[i]));
 		}
 	}
 
@@ -544,14 +543,32 @@ struct render_data
 			cu_handle_desc.size = buffer_info.SizeInBytes;
 			cu_handle_desc.type = cudaExternalMemoryHandleTypeD3D12Resource;
 
-			check(cudaImportExternalMemory((m_cu_backbuffer_ext_mem + i), &cu_handle_desc));
+			check(cudaImportExternalMemory((m_cu_external_memory_handles + i), &cu_handle_desc));
 
-			cudaExternalMemoryBufferDesc cu_buf_desc{};
-			cu_buf_desc.flags = 0;
-			cu_buf_desc.offset = 0;
-			cu_buf_desc.size = buffer_info.SizeInBytes;
+			cudaExternalMemoryMipmappedArrayDesc cu_arr_desc{};
 
-			check(cudaExternalMemoryGetMappedBuffer(reinterpret_cast<void**>(m_cu_backbuffers + i), m_cu_backbuffer_ext_mem[i], &cu_buf_desc));
+			cu_arr_desc.offset = 0;
+			cu_arr_desc.formatDesc = cudaCreateChannelDesc<uchar4>();
+			cu_arr_desc.extent = make_cudaExtent(m_window_width, m_window_height, 0);
+			cu_arr_desc.flags = cudaArraySurfaceLoadStore;
+			cu_arr_desc.numLevels = 1;
+
+			//This does not have to be stored for deletion, as it is automatically invalidated by calling cudaDestroyExternalMemory anyways
+			cudaMipmappedArray_t cu_mipmapped_array;
+
+			check(cudaExternalMemoryGetMappedMipmappedArray(&cu_mipmapped_array, m_cu_external_memory_handles[i], &cu_arr_desc));
+
+			//This does not have to be stored for deletion, as it is automatically invalidated by calling cudaDestroyExternalMemory anyways
+			cudaArray_t cu_array;
+
+			check(cudaGetMipmappedArrayLevel(&cu_array, cu_mipmapped_array, 0));
+
+			cudaResourceDesc res_desc{};
+
+			res_desc.resType = cudaResourceTypeArray;
+			res_desc.res.array.array = cu_array;
+
+			check(cudaCreateSurfaceObject(m_cu_surfaces + i, &res_desc));
 		}
 	}
 
@@ -621,7 +638,40 @@ struct render_data
 
 		if ((now - last_report_time).seconds())
 		{
-			och::print("{}\n", elapsed_frames);
+			wchar_t buf[64]{};
+
+			wchar_t* curr = buf + 62;//Leave last char null
+
+			*curr-- = u']';
+			*curr-- = u's';
+			*curr-- = u'p';
+			*curr-- = u'f';
+			*curr-- = u' ';
+
+			while (elapsed_frames >= 10)
+			{
+				*curr-- = u'0' + elapsed_frames % 10;
+				elapsed_frames /= 10;
+			}
+
+			*curr-- = u'0' + elapsed_frames;
+
+			*curr-- = u'[';
+			*curr = u' ';
+
+			const wchar_t* prev_title = m_window_title;
+
+			int prev_len = 0;
+
+			while (prev_title[prev_len])
+				++prev_len;
+
+			curr -= prev_len;
+
+			for (int i = 0; i != prev_len; ++i)
+				curr[i] = prev_title[i];
+
+			SetWindowTextW(m_window, curr);
 
 			elapsed_frames = 0;
 
@@ -631,105 +681,55 @@ struct render_data
 
 	void render()
 	{
-		//WAIT FOR FRAME TO FINISH
-		//PRESENT
-		//RENDER
-
-		ID3D12CommandAllocator* cmd_allocator = m_cmd_allocators[m_curr_frame];
+		//ID3D12CommandAllocator* cmd_allocator = m_cmd_allocators[m_curr_frame];
 		ID3D12Resource* backbuffer = m_backbuffers[m_curr_frame];
 		
-		cmd_allocator->Reset();
+		//cmd_allocator->Reset();
 
-		m_cmd_list->Reset(cmd_allocator, nullptr);
+		//m_cmd_list->Reset(cmd_allocator, nullptr);
 
 		//Render
-		CD3DX12_RESOURCE_BARRIER clear_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		//CD3DX12_RESOURCE_BARRIER clear_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-		m_cmd_list->ResourceBarrier(1, &clear_barrier);
-
-		//float clear_colour[4]{ 0.352F, 0.588F, 0.600F, 1.0F };
-		//
-		//CD3DX12_CPU_DESCRIPTOR_HANDLE rtv(m_rtv_desc_heap->GetCPUDescriptorHandleForHeapStart(), m_curr_frame, m_rtv_desc_size);
-		//
-		//m_cmd_list->ClearRenderTargetView(rtv, clear_colour, 0, nullptr);
+		//m_cmd_list->ResourceBarrier(1, &clear_barrier);
 
 		/*////////////////////////////////////////////////////////////////////////*/
 		/*//////////////////////////////////CUDA//////////////////////////////////*/
 		/*////////////////////////////////////////////////////////////////////////*/
 
-		//HANDLE backbuffer_handle;
-		//
-		//check(m_device->CreateSharedHandle(backbuffer.Get(), nullptr, GENERIC_ALL, nullptr, &backbuffer_handle));
-		//
-		//HANDLE fence_handle;
-		//
-		//check(m_device->CreateSharedHandle(m_fence.Get(), nullptr, GENERIC_ALL, nullptr, &fence_handle));
-		//
-		//cudaExternalSemaphoreHandleDesc fence_desc{};
-		//
-		//fence_desc.type = cudaExternalSemaphoreHandleTypeD3D12Fence;
-		//fence_desc.handle.win32.handle = fence_handle;
-		//fence_desc.flags = 0;
-		//
-		//cudaExternalSemaphore_t cu_fence;
-		//
-		//check(cudaImportExternalSemaphore(&cu_fence, &fence_desc));
-		//
-		//cudaExternalSemaphoreWaitParams fence_wait_params{};
-		//fence_wait_params.params.fence.value = m_fence_value;
-		//fence_wait_params.flags = 0;
-		//
-		//D3D12_RESOURCE_DESC buffer_desc = backbuffer->GetDesc();
-		//
-		//D3D12_RESOURCE_ALLOCATION_INFO buffer_info = m_device->GetResourceAllocationInfo(0, 1, &buffer_desc);
-		//
-		//cudaExternalMemoryHandleDesc cu_handle_desc{};
-		//cu_handle_desc.flags = cudaExternalMemoryDedicated;
-		//cu_handle_desc.handle.win32.handle = backbuffer_handle;
-		//cu_handle_desc.size = buffer_info.SizeInBytes;
-		//cu_handle_desc.type = cudaExternalMemoryHandleTypeD3D12Resource;
-		//
-		//cudaExternalMemory_t cu_buffer_mem;
-		//
-		//check(cudaImportExternalMemory(&cu_buffer_mem, &cu_handle_desc));
-		//
-		//void* dev_backbuffer;
-		//
-		//cudaExternalMemoryBufferDesc cu_buf_desc{};
-		//cu_buf_desc.flags = 0;
-		//cu_buf_desc.offset = 0;
-		//cu_buf_desc.size = buffer_info.SizeInBytes;
-		//
-		//check(cudaExternalMemoryGetMappedBuffer(&dev_backbuffer, cu_buffer_mem, &cu_buf_desc));
-		//
-		//dim3 threads_per_block(64, 64);
-		//dim3 blocks_per_grid((m_window_width + 63) / 64, (m_window_height + 63) / 64);
-		//
-		////check(launch_set_to(threads_per_block, blocks_per_grid, 0xFF007FFF, dev_backbuffer, m_window_width, m_window_width, m_window_height));
-		//
-		////Cleanup
-		//check(cudaFree(dev_backbuffer));
-		//
-		//check(cudaDestroyExternalMemory(cu_buffer_mem));
-		//
-		//CloseHandle(fence_handle);
-		//
-		//CloseHandle(backbuffer_handle);
+		dim3 threads_per_block(64, 64);
+		dim3 blocks_per_grid((m_window_width + 63) / 64, (m_window_height + 63) / 64);
+
+		//ABGR
+		//MY new favourite colour: 0xFF007FFF (ABGR)
+		//check(launch_set_surface_to(threads_per_block, blocks_per_grid, draw_color, m_cu_surfaces[m_curr_frame], m_window_width, m_window_height));
+
+		static float z_offset = 0.0F;
+
+		uint2 surface_dim{ m_window_width, m_window_height };
+		float3 offset{ 0.0F, 0.0F, z_offset };
+		float2 step{ 1.0F / 256.0F, 1.0F / 256.0F };
+
+		z_offset += 1.0F / 2048.0F;
+
+		launch_simplex_3d_surface2d_grayscale_argb(threads_per_block, blocks_per_grid, m_cu_surfaces[m_curr_frame], surface_dim, offset, step, 0);
+
+		cudaDeviceSynchronize();
 
 		/*////////////////////////////////////////////////////////////////////////*/
 		/*////////////////////////////////END CUDA////////////////////////////////*/
 		/*////////////////////////////////////////////////////////////////////////*/
 
 		//Present
-		CD3DX12_RESOURCE_BARRIER present_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+		//CD3DX12_RESOURCE_BARRIER present_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 
-		m_cmd_list->ResourceBarrier(1, &present_barrier);
+		//m_cmd_list->ResourceBarrier(1, &present_barrier);
 
-		check(m_cmd_list->Close());
+		//check(m_cmd_list->Close());
 
-		ID3D12CommandList* const cmd_lists[]{ m_cmd_list };
+		//ID3D12CommandList* const cmd_lists[]{ m_cmd_list };
 
-		m_cmd_queue->ExecuteCommandLists(1, cmd_lists);
+		//m_cmd_queue->ExecuteCommandLists(1, cmd_lists);
 
 		int32_t sync_interval = static_cast<int32_t>(m_vsync & !m_supports_tearing);
 
@@ -738,18 +738,23 @@ struct render_data
 		check(m_swapchain->Present(sync_interval, present_flags));
 
 		//Signal fence on completion of 'Present'
-		check(m_cmd_queue->Signal(m_fence, ++m_curr_fence_value));
-		m_fence_values[m_curr_frame] = m_curr_fence_value;
+		//check(m_cmd_queue->Signal(m_fence, ++m_curr_fence_value));
+		//m_fence_values[m_curr_frame] = m_curr_fence_value;
 
-		m_curr_frame = m_swapchain->GetCurrentBackBufferIndex();
+		uint8_t next_frame = m_swapchain->GetCurrentBackBufferIndex();
+
+		if (m_curr_frame == next_frame)
+			och::print("AAAH\n");
+
+		m_curr_frame = next_frame;
 
 		//Wait for current buffer to complete. TODO: Could be moved to top of function, to minimize blocking
-		if (m_fence->GetCompletedValue() < m_fence_values[m_curr_frame])
-		{
-			check(m_fence->SetEventOnCompletion(m_fence_values[m_curr_frame], m_fence_event));
-		
-			WaitForSingleObject(m_fence_event, INFINITE);
-		}
+		//if (m_fence->GetCompletedValue() < m_fence_values[m_curr_frame])
+		//{
+		//	check(m_fence->SetEventOnCompletion(m_fence_values[m_curr_frame], m_fence_event));
+		//
+		//	WaitForSingleObject(m_fence_event, INFINITE);
+		//}
 	}
 
 	void resize(uint16_t new_width, uint16_t new_height)
@@ -777,6 +782,7 @@ struct render_data
 		update_rtvs();
 	}
 
+	//TODO: Crashes sporadically
 	void set_fullscreen(bool fullscreen)
 	{
 		if (m_is_fullscreen == fullscreen)
