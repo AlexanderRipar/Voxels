@@ -353,9 +353,9 @@ struct render_data
 			wnd_desc.SampleDesc = { 1, 0 };
 			wnd_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
 			wnd_desc.BufferCount = m_frame_cnt;
-			wnd_desc.Scaling = DXGI_SCALING_STRETCH;//CUSTOMIZE
+			wnd_desc.Scaling = DXGI_SCALING_NONE;
 			wnd_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-			wnd_desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;//CUSTOM
+			wnd_desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;
 			//if (m_supports_tearing)
 			//	wnd_desc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
