@@ -344,26 +344,24 @@ struct render_data
 
 		//Create DXGI swapchain
 		{
-			DXGI_SWAP_CHAIN_DESC1 swapchain_desc{};
+			DXGI_SWAP_CHAIN_DESC1 wnd_desc{};
 
-			swapchain_desc.Width = width;
-			swapchain_desc.Height = height;
-			swapchain_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
-			swapchain_desc.Stereo = false;
-			swapchain_desc.SampleDesc = { 1, 0 };
-			swapchain_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
-			swapchain_desc.BufferCount = m_frame_cnt;
-			swapchain_desc.Scaling = DXGI_SCALING_STRETCH;//CUSTOMIZE
-			swapchain_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
-			swapchain_desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;//CUSTOM
-			if (m_supports_tearing)
-				swapchain_desc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
+			wnd_desc.Width = width;
+			wnd_desc.Height = height;
+			wnd_desc.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+			wnd_desc.Stereo = false;
+			wnd_desc.SampleDesc = { 1, 0 };
+			wnd_desc.BufferUsage = DXGI_USAGE_RENDER_TARGET_OUTPUT;
+			wnd_desc.BufferCount = m_frame_cnt;
+			wnd_desc.Scaling = DXGI_SCALING_STRETCH;//CUSTOMIZE
+			wnd_desc.SwapEffect = DXGI_SWAP_EFFECT_FLIP_DISCARD;
+			wnd_desc.AlphaMode = DXGI_ALPHA_MODE_IGNORE;//CUSTOM
+			//if (m_supports_tearing)
+			//	wnd_desc.Flags = DXGI_SWAP_CHAIN_FLAG_ALLOW_TEARING;
 
 			IDXGISwapChain1* swapchain_1;
 
-			check(dxgi_factory->CreateSwapChainForHwnd(m_cmd_queue, m_window, &swapchain_desc, nullptr, nullptr, &swapchain_1));
-
-			check(dxgi_factory->MakeWindowAssociation(m_window, DXGI_MWA_NO_ALT_ENTER));
+			check(dxgi_factory->CreateSwapChainForHwnd(m_cmd_queue, m_window, &wnd_desc, nullptr, nullptr, &swapchain_1));
 
 			check(swapchain_1->QueryInterface(&m_swapchain));
 
@@ -737,7 +735,7 @@ struct render_data
 
 		int32_t sync_interval = static_cast<int32_t>(m_vsync & !m_supports_tearing);
 
-		int32_t present_flags = m_supports_tearing && m_vsync ? DXGI_PRESENT_ALLOW_TEARING : 0;
+		int32_t present_flags = 0;// m_supports_tearing&& m_vsync ? DXGI_PRESENT_ALLOW_TEARING : 0;
 
 		check(m_swapchain->Present(sync_interval, present_flags));
 
@@ -780,48 +778,6 @@ struct render_data
 
 		update_rtvs();
 	}
-
-	//TODO: Crashes sporadically
-	void set_fullscreen(bool fullscreen)
-	{
-		if (m_is_fullscreen == fullscreen)
-			return;
-
-		m_is_fullscreen = fullscreen;
-
-		if(fullscreen)
-		{
-			GetWindowRect(m_window, &m_window_rect);
-
-			uint32_t window_style = 0;
-
-			SetWindowLongPtrW(m_window, GWL_STYLE, window_style);
-
-			HMONITOR monitor = MonitorFromWindow(m_window, MONITOR_DEFAULTTONEAREST);
-
-			MONITORINFOEXW mon_info{};
-
-			mon_info.cbSize = sizeof(MONITORINFOEXW);
-
-			GetMonitorInfoW(monitor, &mon_info);
-
-			RECT& mr = mon_info.rcMonitor;
-
-			SetWindowPos(m_window, HWND_TOP, mr.left, mr.top, mr.right - mr.left, mr.bottom - mr.top, SWP_FRAMECHANGED | SWP_NOACTIVATE);
-
-			ShowWindow(m_window, SW_MAXIMIZE);
-		}
-		else
-		{
-			SetWindowLongPtrW(m_window, GWL_STYLE, WS_OVERLAPPEDWINDOW);
-
-			SetWindowPos(m_window, HWND_NOTOPMOST, m_window_rect.left, m_window_rect.top, m_window_rect.right - m_window_rect.left, m_window_rect.bottom - m_window_rect.top, SWP_FRAMECHANGED | SWP_NOACTIVATE);
-
-			ShowWindow(m_window, SW_NORMAL);
-		}
-	}
-
-
 
 	/*////////////////////////////////////////////////////////////////////////*/
 	/*/////////////////////////////INPUT / OUTPUT/////////////////////////////*/
@@ -883,7 +839,7 @@ LRESULT CALLBACK window_function(HWND window, UINT msg, WPARAM wp, LPARAM lp)
 				if (!rd.key_is_down(och::vk::alt))
 					break;
 			case och::vk::f11:
-				rd.set_fullscreen(!rd.m_is_fullscreen);
+				//rd.set_fullscreen(!rd.m_is_fullscreen);
 				break;
 			case och::vk::escape:
 				PostQuitMessage(0);
