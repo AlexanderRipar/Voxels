@@ -633,44 +633,44 @@ struct render_data
 		static och::time last_report_time = och::time::now();
 
 		++elapsed_frames;
-		
+
 		och::time now = och::time::now();
 
 		if ((now - last_report_time).seconds())
 		{
 			wchar_t buf[64]{};
-
+			
 			wchar_t* curr = buf + 62;//Leave last char null
-
+			
 			*curr-- = u']';
 			*curr-- = u's';
 			*curr-- = u'p';
 			*curr-- = u'f';
 			*curr-- = u' ';
-
+			
 			while (elapsed_frames >= 10)
 			{
 				*curr-- = u'0' + elapsed_frames % 10;
 				elapsed_frames /= 10;
 			}
-
-			*curr-- = u'0' + elapsed_frames;
-
+			
+			*curr-- = u'0' + static_cast<wchar_t>(elapsed_frames);
+			
 			*curr-- = u'[';
 			*curr = u' ';
-
+			
 			const wchar_t* prev_title = m_window_title;
-
+			
 			int prev_len = 0;
-
+			
 			while (prev_title[prev_len])
 				++prev_len;
-
+			
 			curr -= prev_len;
-
+			
 			for (int i = 0; i != prev_len; ++i)
 				curr[i] = prev_title[i];
-
+			
 			SetWindowTextW(m_window, curr);
 
 			elapsed_frames = 0;
@@ -681,17 +681,21 @@ struct render_data
 
 	void render()
 	{
-		//ID3D12CommandAllocator* cmd_allocator = m_cmd_allocators[m_curr_frame];
+		//WAIT FOR FRAME TO FINISH
+		//PRESENT
+		//RENDER
+
+		ID3D12CommandAllocator* cmd_allocator = m_cmd_allocators[m_curr_frame];
 		ID3D12Resource* backbuffer = m_backbuffers[m_curr_frame];
 		
-		//cmd_allocator->Reset();
+		cmd_allocator->Reset();
 
-		//m_cmd_list->Reset(cmd_allocator, nullptr);
+		m_cmd_list->Reset(cmd_allocator, nullptr);
 
 		//Render
-		//CD3DX12_RESOURCE_BARRIER clear_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
+		CD3DX12_RESOURCE_BARRIER clear_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
 
-		//m_cmd_list->ResourceBarrier(1, &clear_barrier);
+		m_cmd_list->ResourceBarrier(1, &clear_barrier);
 
 		/*////////////////////////////////////////////////////////////////////////*/
 		/*//////////////////////////////////CUDA//////////////////////////////////*/
@@ -721,15 +725,15 @@ struct render_data
 		/*////////////////////////////////////////////////////////////////////////*/
 
 		//Present
-		//CD3DX12_RESOURCE_BARRIER present_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
+		CD3DX12_RESOURCE_BARRIER present_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
 
-		//m_cmd_list->ResourceBarrier(1, &present_barrier);
+		m_cmd_list->ResourceBarrier(1, &present_barrier);
 
-		//check(m_cmd_list->Close());
+		check(m_cmd_list->Close());
 
-		//ID3D12CommandList* const cmd_lists[]{ m_cmd_list };
+		ID3D12CommandList* const cmd_lists[]{ m_cmd_list };
 
-		//m_cmd_queue->ExecuteCommandLists(1, cmd_lists);
+		m_cmd_queue->ExecuteCommandLists(1, cmd_lists);
 
 		int32_t sync_interval = static_cast<int32_t>(m_vsync & !m_supports_tearing);
 
@@ -738,23 +742,18 @@ struct render_data
 		check(m_swapchain->Present(sync_interval, present_flags));
 
 		//Signal fence on completion of 'Present'
-		//check(m_cmd_queue->Signal(m_fence, ++m_curr_fence_value));
-		//m_fence_values[m_curr_frame] = m_curr_fence_value;
+		check(m_cmd_queue->Signal(m_fence, ++m_curr_fence_value));
+		m_fence_values[m_curr_frame] = m_curr_fence_value;
 
-		uint8_t next_frame = m_swapchain->GetCurrentBackBufferIndex();
-
-		if (m_curr_frame == next_frame)
-			och::print("AAAH\n");
-
-		m_curr_frame = next_frame;
+		m_curr_frame = m_swapchain->GetCurrentBackBufferIndex();
 
 		//Wait for current buffer to complete. TODO: Could be moved to top of function, to minimize blocking
-		//if (m_fence->GetCompletedValue() < m_fence_values[m_curr_frame])
-		//{
-		//	check(m_fence->SetEventOnCompletion(m_fence_values[m_curr_frame], m_fence_event));
-		//
-		//	WaitForSingleObject(m_fence_event, INFINITE);
-		//}
+		if (m_fence->GetCompletedValue() < m_fence_values[m_curr_frame])
+		{
+			check(m_fence->SetEventOnCompletion(m_fence_values[m_curr_frame], m_fence_event));
+		
+			WaitForSingleObject(m_fence_event, INFINITE);
+		}
 	}
 
 	void resize(uint16_t new_width, uint16_t new_height)
