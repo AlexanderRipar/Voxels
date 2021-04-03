@@ -101,8 +101,8 @@ struct render_data
 	ID3D12CommandQueue* m_cmd_queue;
 	IDXGISwapChain4* m_swapchain;
 	ID3D12Resource* m_backbuffers[m_frame_cnt];
-	ID3D12GraphicsCommandList* m_cmd_list;
-	ID3D12CommandAllocator* m_cmd_allocators[m_frame_cnt];
+	//ID3D12GraphicsCommandList* m_cmd_list;
+	//ID3D12CommandAllocator* m_cmd_allocators[m_frame_cnt];
 	ID3D12DescriptorHeap* m_rtv_desc_heap;
 
 	ID3D12Fence* m_fence;
@@ -287,7 +287,7 @@ struct render_data
 			dxgi_factory_5->Release();
 		}
 
-		//Get the DXGI adapter  corresponding to the luid of the previously selected cuda-device and use it to create a D3D12-Device
+		//Get the DXGI adapter corresponding to the luid of the previously selected cuda-device and use it to create a D3D12-Device
 		{
 			IDXGIAdapter4* dxgi_adapter;
 
@@ -366,7 +366,61 @@ struct render_data
 			check(swapchain_1->QueryInterface(&m_swapchain));
 
 			swapchain_1->Release();
+
+			//Set background to black, so it is less distracting when resizing the window
+			DXGI_RGBA background_colour{ 0.0F, 0.0F, 0.0F, 1.0F };
+			check(m_swapchain->SetBackgroundColor(&background_colour));
 		}
+
+		//TODO: EXPERIMENTAL: Get the most fitting supported output format
+		//{
+		//	IDXGIOutput* output;
+		//
+		//	check(m_swapchain->GetContainingOutput(&output));
+		//
+		//	DXGI_OUTPUT_DESC monitor_desc;
+		//
+		//	check(output->GetDesc(&monitor_desc));
+		//
+		//	HMONITOR hmon = monitor_desc.Monitor;
+		//
+		//	MONITORINFO monitor_info{ sizeof(monitor_info) };
+		//
+		//	GetMonitorInfoW(hmon, &monitor_info);
+		//
+		//	int32_t monitor_width = monitor_info.rcMonitor.right - monitor_info.rcMonitor.left;
+		//	int32_t monitor_height = monitor_info.rcMonitor.bottom - monitor_info.rcMonitor.top;
+		//
+		//	UINT mode_count;
+		//
+		//	DXGI_MODE_DESC wanted_fmt{};
+		//	wanted_fmt.Width = monitor_width;
+		//	wanted_fmt.Height = monitor_height;
+		//	wanted_fmt.Format = DXGI_FORMAT_R8G8B8A8_UNORM;
+		//	wanted_fmt.ScanlineOrdering = DXGI_MODE_SCANLINE_ORDER_PROGRESSIVE;
+		//	wanted_fmt.Scaling = DXGI_MODE_SCALING_UNSPECIFIED;
+		//
+		//	DXGI_MODE_DESC actual_fmt;
+		//
+		//	check(output->FindClosestMatchingMode(&wanted_fmt, &actual_fmt, nullptr));
+		//
+		//	if (actual_fmt.Format != wanted_fmt.Format)
+		//		panic("The current output device does not support 4x8 bit output modes, which are required by the application\n");
+		//
+		//	och::print("Dimensions: {}x{}\n", actual_fmt.Width, actual_fmt.Height);
+		//
+		//	och::print("Refresh Rate: {}/{}\n", actual_fmt.RefreshRate.Denominator, actual_fmt.RefreshRate.Numerator);
+		//
+		//	int so = actual_fmt.ScanlineOrdering;
+		//
+		//	och::print("Scanline-order: {}\n", so == 0 ? "Unspecified" : so == 1 ? "Progressive" : so == 2 ? "Upper field first" : "Lower field first");
+		//
+		//	int sc = actual_fmt.Scaling;
+		//
+		//	och::print("Scaling: {}\n\n\n", sc == 0 ? "Unspecified" : so == 1 ? "Centered" : "Stretched");
+		//
+		//	output->Release();
+		//}
 
 		//Get index of current backbuffer from swapchain
 		m_curr_frame = m_swapchain->GetCurrentBackBufferIndex();
@@ -406,19 +460,6 @@ struct render_data
 
 		//Map backbuffers for access by cuda
 		map_backbuffers_for_cuda();
-
-		//Create command allocators for each backbuffer, to allow cycling through them
-		{
-			for (int32_t i = 0; i != m_frame_cnt; ++i)
-				check(m_device->CreateCommandAllocator(D3D12_COMMAND_LIST_TYPE_DIRECT, IID_PPV_ARGS((m_cmd_allocators + i))));
-		}
-
-		//Create command list, which initially uses the allocator corresponding to the swapchain's current backbuffer
-		{
-			check(m_device->CreateCommandList(0, D3D12_COMMAND_LIST_TYPE_DIRECT, m_cmd_allocators[m_curr_frame], nullptr, IID_PPV_ARGS(&m_cmd_list)));
-
-			check(m_cmd_list->Close());
-		}
 
 		//Create a shared D3D12 fence which can also be accessed by cuda
 		m_device->CreateFence(0, D3D12_FENCE_FLAG_SHARED, IID_PPV_ARGS(&m_fence));
@@ -466,14 +507,8 @@ struct render_data
 		//D3D12/DXGI stuff
 		m_fence->Release();
 
-		m_cmd_list->Release();
-
 		for (int i = 0; i != m_frame_cnt; ++i)
-		{
 			m_backbuffers[i]->Release();
-
-			m_cmd_allocators[i]->Release();
-		}
 
 		m_rtv_desc_heap->Release();
 
@@ -592,25 +627,6 @@ struct render_data
 		map_backbuffers_for_cuda();
 	}
 
-	//uint64_t signal(ID3D12CommandQueue* queue, ID3D12Fence* fence, uint64_t& fence_value)
-	//{
-	//	uint64_t value_for_signal = ++fence_value;
-	//
-	//	check(queue->Signal(fence, value_for_signal));
-	//
-	//	return fence_value;
-	//}
-
-	//void wait_for_fence(ID3D12Fence* fence, uint64_t value_to_await, HANDLE fence_event)
-	//{
-	//	if (fence->GetCompletedValue() < value_to_await)
-	//	{
-	//		check(fence->SetEventOnCompletion(value_to_await, fence_event));
-	//
-	//		WaitForSingleObject(fence_event, INFINITE);
-	//	}
-	//}
-
 	void wait_for_gpu()
 	{
 		++m_fence_values[m_curr_frame];
@@ -625,7 +641,7 @@ struct render_data
 		}
 	}
 
-	void update()
+	void count_fps()
 	{
 		static uint64_t elapsed_frames = 0;
 		static och::time last_report_time = och::time::now();
@@ -679,21 +695,13 @@ struct render_data
 
 	void render()
 	{
-		//WAIT FOR FRAME TO FINISH
-		//PRESENT
-		//RENDER
+		//Wait for current buffer to complete. TODO: Could be moved to top of function, to minimize blocking
+		if (m_fence->GetCompletedValue() < m_fence_values[m_curr_frame])
+		{
+			check(m_fence->SetEventOnCompletion(m_fence_values[m_curr_frame], m_fence_event));
 
-		ID3D12CommandAllocator* cmd_allocator = m_cmd_allocators[m_curr_frame];
-		ID3D12Resource* backbuffer = m_backbuffers[m_curr_frame];
-		
-		cmd_allocator->Reset();
-
-		m_cmd_list->Reset(cmd_allocator, nullptr);
-
-		//Render
-		CD3DX12_RESOURCE_BARRIER clear_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer, D3D12_RESOURCE_STATE_PRESENT, D3D12_RESOURCE_STATE_RENDER_TARGET);
-
-		m_cmd_list->ResourceBarrier(1, &clear_barrier);
+			WaitForSingleObject(m_fence_event, INFINITE);
+		}
 
 		/*////////////////////////////////////////////////////////////////////////*/
 		/*//////////////////////////////////CUDA//////////////////////////////////*/
@@ -701,10 +709,6 @@ struct render_data
 
 		dim3 threads_per_block(64, 64);
 		dim3 blocks_per_grid((m_window_width + 63) / 64, (m_window_height + 63) / 64);
-
-		//ABGR
-		//MY new favourite colour: 0xFF007FFF (ABGR)
-		//check(launch_set_surface_to(threads_per_block, blocks_per_grid, draw_color, m_cu_surfaces[m_curr_frame], m_window_width, m_window_height));
 
 		static float z_offset = 0.0F;
 
@@ -722,36 +726,15 @@ struct render_data
 		/*////////////////////////////////END CUDA////////////////////////////////*/
 		/*////////////////////////////////////////////////////////////////////////*/
 
-		//Present
-		CD3DX12_RESOURCE_BARRIER present_barrier = CD3DX12_RESOURCE_BARRIER::Transition(backbuffer, D3D12_RESOURCE_STATE_RENDER_TARGET, D3D12_RESOURCE_STATE_PRESENT);
-
-		m_cmd_list->ResourceBarrier(1, &present_barrier);
-
-		check(m_cmd_list->Close());
-
-		ID3D12CommandList* const cmd_lists[]{ m_cmd_list };
-
-		m_cmd_queue->ExecuteCommandLists(1, cmd_lists);
-
-		int32_t sync_interval = static_cast<int32_t>(m_vsync & !m_supports_tearing);
-
-		int32_t present_flags = 0;// m_supports_tearing&& m_vsync ? DXGI_PRESENT_ALLOW_TEARING : 0;
-
-		check(m_swapchain->Present(sync_interval, present_flags));
+		//TODO: Check for frame occlusion and maybe do some fancy schmancy standby stuff
+		check(m_swapchain->Present(static_cast<int32_t>(m_vsync & !m_supports_tearing), 0 /*m_supports_tearing && m_vsync ? DXGI_PRESENT_ALLOW_TEARING : 0*/));
 
 		//Signal fence on completion of 'Present'
 		check(m_cmd_queue->Signal(m_fence, ++m_curr_fence_value));
+
 		m_fence_values[m_curr_frame] = m_curr_fence_value;
 
 		m_curr_frame = m_swapchain->GetCurrentBackBufferIndex();
-
-		//Wait for current buffer to complete. TODO: Could be moved to top of function, to minimize blocking
-		if (m_fence->GetCompletedValue() < m_fence_values[m_curr_frame])
-		{
-			check(m_fence->SetEventOnCompletion(m_fence_values[m_curr_frame], m_fence_event));
-		
-			WaitForSingleObject(m_fence_event, INFINITE);
-		}
 	}
 
 	void resize(uint16_t new_width, uint16_t new_height)
@@ -817,7 +800,7 @@ LRESULT CALLBACK window_function(HWND window, UINT msg, WPARAM wp, LPARAM lp)
 		switch (msg)
 		{
 		case WM_PAINT:
-			rd.update();
+			rd.count_fps();
 			rd.render();
 			break;
 
@@ -835,12 +818,6 @@ LRESULT CALLBACK window_function(HWND window, UINT msg, WPARAM wp, LPARAM lp)
 		case WM_SYSKEYDOWN:
 			switch (wp)
 			{
-			case och::vk::enter:
-				if (!rd.key_is_down(och::vk::alt))
-					break;
-			case och::vk::f11:
-				//rd.set_fullscreen(!rd.m_is_fullscreen);
-				break;
 			case och::vk::escape:
 				PostQuitMessage(0);
 				
