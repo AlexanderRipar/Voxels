@@ -176,7 +176,7 @@ __global__ void d_simplex_3d_uint8_t(cudaPitchedPtr dst, uint3 dim, float3 begin
 	const float x3 = x0 - 1.0F + unskew_factor * 3.0F;
 	const float y3 = y0 - 1.0F + unskew_factor * 3.0F;
 	const float z3 = z0 - 1.0F + unskew_factor * 3.0F;
-
+	
 	float t0 = 0.5F - x0 * x0 - y0 * y0 - z0 * z0;
 	if (t0 < 0.0F) t0 = 0.0F;
 	t0 = t0 * t0 * t0 * t0 * d_dot_with_hashed_vec(       i0,        j0,        k0, x0, y0, z0, seed);
@@ -233,11 +233,11 @@ __global__ void d_simplex_3d_surface2d_grayscale_argb(cudaSurfaceObject_t surf, 
 	const float z0 = z_in - z_orig;
 
 	const float i1 = ((x0 >= y0) & (x0 >= z0)) ? 1.0F : 0.0F;    //max == x
-	const float j1 = ((y0 > x0) & (y0 >= z0)) ? 1.0F : 0.0F;    //max == y
-	const float k1 = ((z0 > x0) & (z0 > y0)) ? 1.0F : 0.0F;    //max == z
+	const float j1 = ((y0 >  x0) & (y0 >= z0)) ? 1.0F : 0.0F;    //max == y
+	const float k1 = ((z0 >  x0) & (z0 >  y0)) ? 1.0F : 0.0F;    //max == z
 	const float i2 = ((x0 >= y0) | (x0 >= z0)) ? 1.0F : 0.0F;    //min != x
-	const float j2 = ((y0 > x0) | (y0 >= z0)) ? 1.0F : 0.0F;    //min != y
-	const float k2 = ((z0 > x0) | (z0 > y0)) ? 1.0F : 0.0F;    //min != z
+	const float j2 = ((y0 >  x0) | (y0 >= z0)) ? 1.0F : 0.0F;    //min != y
+	const float k2 = ((z0 >  x0) | (z0 >  y0)) ? 1.0F : 0.0F;    //min != z
 
 	const float x1 = x0 - i1 + unskew_factor;
 	const float y1 = y0 - j1 + unskew_factor;
